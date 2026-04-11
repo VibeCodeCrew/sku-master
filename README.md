@@ -13,6 +13,11 @@
 - **Защита от перегрузок** — встроенный троттлинг запросов к API М.Видео для снижения риска блокировки
 - **История обработки** — отслеживание ранее обработанных артикулов с возможностью очистки
 - **Определение региона** — предупреждение, если город не Москва (цены и наличие могут отличаться)
+- **Автопроверка обновлений** — расширение проверяет наличие новой версии каждые 6 часов и уведомляет о доступном обновлении
+
+## Обновление
+
+Расширение автоматически проверяет наличие новой версии. При обнаружении обновления появится уведомление — нажмите на него, чтобы перейти на страницу загрузки. После скачивания замените файлы и нажмите кнопку обновления на `chrome://extensions/`.
 
 ## Установка
 
@@ -63,6 +68,11 @@ Chrome extension (Manifest V3) for working with product SKUs from M.Video and El
 - **Rate Limiting Protection** — built-in request throttling for M.Video API to reduce blocking risk
 - **Processing History** — track previously processed SKUs with the ability to clear history
 - **Region Detection** — warning if the city is not Moscow (prices and availability may differ)
+- **Auto-update Check** — the extension checks for new versions every 6 hours and notifies when an update is available
+
+## Updating
+
+The extension automatically checks for new versions. When an update is found, a notification will appear — click it to go to the download page. After downloading, replace the files and click the reload button on `chrome://extensions/`.
 
 ## Installation
 

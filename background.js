@@ -15,25 +15,64 @@ function saveBlockedTabs() {
 }
 
 // === МОНИТОРИНГ: инициализация alarm ===
-chrome.runtime.onInstalled.addListener(() => initMonitorAlarm());
-chrome.runtime.onStartup.addListener(() => initMonitorAlarm());
+chrome.runtime.onInstalled.addListener(() => { initMonitorAlarm(); checkForUpdate(); });
+chrome.runtime.onStartup.addListener(() => { initMonitorAlarm(); checkForUpdate(); });
 
 function initMonitorAlarm() {
   chrome.storage.local.get('monitorInterval', (res) => {
     const minutes = res.monitorInterval || 5;
     chrome.alarms.create('priceCheckAlarm', { periodInMinutes: minutes });
   });
+  chrome.alarms.create('updateCheckAlarm', { periodInMinutes: 360 }); // раз в 6 часов
+}
+
+// === ПРОВЕРКА ОБНОВЛЕНИЙ ===
+const UPDATE_URL = 'https://raw.githubusercontent.com/VibeCodeCrew/sku-master/master/manifest.json';
+
+async function checkForUpdate() {
+  try {
+    const resp = await fetch(UPDATE_URL, { cache: 'no-store' });
+    if (!resp.ok) return;
+    const remote = await resp.json();
+    const local = chrome.runtime.getManifest();
+    if (remote.version !== local.version && isNewerVersion(remote.version, local.version)) {
+      chrome.notifications.create('sku-update-available', {
+        type: 'basic',
+        iconUrl: 'icon.png',
+        title: 'SKU Master — доступно обновление',
+        message: `Новая версия ${remote.version} (у вас ${local.version}). Нажмите, чтобы скачать.`,
+        priority: 2
+      });
+    }
+  } catch (e) {}
+}
+
+function isNewerVersion(remote, local) {
+  const r = remote.split('.').map(Number);
+  const l = local.split('.').map(Number);
+  for (let i = 0; i < Math.max(r.length, l.length); i++) {
+    if ((r[i] || 0) > (l[i] || 0)) return true;
+    if ((r[i] || 0) < (l[i] || 0)) return false;
+  }
+  return false;
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'priceCheckAlarm') runMonitorCheck();
   if (alarm.name === 'banQuickCheck') runBanQuickCheck();
+  if (alarm.name === 'updateCheckAlarm') checkForUpdate();
 });
 
 // Клик по уведомлению — найти существующую вкладку или открыть виджет
 chrome.notifications.onClicked.addListener((notifId) => {
   chrome.notifications.clear(notifId);
   chrome.action.setBadgeText({ text: '' });
+
+  // Уведомление об обновлении — открываем страницу релизов
+  if (notifId === 'sku-update-available') {
+    chrome.tabs.create({ url: 'https://github.com/VibeCodeCrew/sku-master/releases', active: true });
+    return;
+  }
 
   // Батчевые уведомления — открываем виджет на активной вкладке магазина
   if (notifId === 'ban-check-batch' || notifId === 'monitor-batch') {
