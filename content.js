@@ -1,4 +1,4 @@
-// content.js - WIDGET UI v5.0.0 (Bulk Check + Duplicate Detection)
+// content.js - WIDGET UI (Bulk Check + Duplicate Detection)
 
 const isTop = window === window.top;
 let widgetObserver = null; 
@@ -93,7 +93,8 @@ chrome.storage.onChanged.addListener((changes) => {
 function initInterface() {
     if (!isTop) return; 
 
-    console.info("%c SKU Master 5.0.0 ", "background: #28a745; color: white; padding: 2px 5px; border-radius: 3px;");
+    const EXT_VERSION = chrome.runtime.getManifest().version;
+    console.info(`%c SKU Master ${EXT_VERSION} `, "background: #28a745; color: white; padding: 2px 5px; border-radius: 3px;");
     const ICON_URL = chrome.runtime.getURL("icon.png");
 
     // Stub overwritten by createPanel once toastMsg element exists
@@ -305,7 +306,8 @@ function initInterface() {
     });
 
     let panelState = { mvideoIds: [], eldoradoIds: [], results: [] };
-    let batchState = { uniqueSkus: [], isMvideo: null, resolvedLinks: [] }; 
+    let batchState = { uniqueSkus: [], isMvideo: null, resolvedLinks: [] };
+    let batchCheckResults = null;
     
     let widgetState = {
         x: window.innerWidth - 80,
@@ -399,7 +401,7 @@ function initInterface() {
 
       /* ── RESIZE HANDLE ── */
       .resize-handle {
-        width: 100%; height: 7px; cursor: ns-resize; flex-shrink: 0;
+        width: 100%; height: 10px; cursor: ns-resize; flex-shrink: 0;
         display: flex; align-items: center; justify-content: center;
         background: #0d1117;
       }
@@ -407,6 +409,11 @@ function initInterface() {
         content: ''; display: block;
         width: 30px; height: 3px; border-radius: 2px;
         background: rgba(255,255,255,0.18);
+        transition: background 0.15s, width 0.15s;
+      }
+      .resize-handle:hover::after {
+        background: rgba(255,255,255,0.45);
+        width: 40px;
       }
 
       /* ── HEADER ── */
@@ -434,6 +441,7 @@ function initInterface() {
         transition: background 0.15s;
       }
       .btn-icon:hover { background: rgba(255,255,255,0.14); }
+      .btn-icon.active { background: rgba(37,99,235,0.25); color: #60a5fa; }
 
       /* ── CONTENT ── */
       .content {
@@ -604,13 +612,14 @@ function initInterface() {
       .btn-watch.watching:hover { background:#059669; color:white; }
 
       /* ── BULK CHECK RESULTS (#3) ── */
-      .bulk-results { margin-top:8px; max-height:200px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc; }
+      .bulk-results { margin-top:8px; max-height:45vh; overflow-y:auto; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc; }
       .bulk-item {
         display:flex; justify-content:space-between; align-items:center;
         padding:7px 10px; border-bottom:1px solid #f1f5f9; font-size:12px;
       }
       .bulk-item:last-child { border-bottom:none; }
-      .bulk-item-sku { font-weight:700; color:#1e293b; font-family:'SF Mono','Consolas',monospace; }
+      .bulk-item-sku { font-weight:700; color:#1e293b; font-family:'SF Mono','Consolas',monospace; text-decoration:none; transition:color 0.15s; }
+      a.bulk-item-sku:hover { color:#2563eb; text-decoration:underline; }
       .bulk-item-price { color:#059669; font-weight:600; font-size:11px; }
       .bulk-item-status { padding:2px 6px; border-radius:4px; font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:0.3px; }
       .bs-available { background:#dcfce7; color:#166534; }
@@ -619,6 +628,26 @@ function initInterface() {
       .bs-banned { background:#1e293b; color:#fbbf24; }
       .bs-error { background:#f1f5f9; color:#64748b; }
       .bulk-summary { padding:8px 10px; font-size:11px; color:#64748b; display:flex; justify-content:space-between; border-bottom:1px solid #e2e8f0; background:#fff; border-radius:8px 8px 0 0; }
+
+      /* ── CUSTOM MODAL ── */
+      .modal-overlay {
+        position:absolute; inset:0; background:rgba(0,0,0,0.4); z-index:2000;
+        display:flex; align-items:center; justify-content:center; border-radius:14px;
+      }
+      .modal-box {
+        background:white; border-radius:12px; padding:20px; width:280px;
+        box-shadow:0 16px 48px rgba(0,0,0,0.25); text-align:center;
+        font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+      }
+      .modal-text { font-size:13px; color:#1e293b; line-height:1.5; white-space:pre-line; margin-bottom:16px; }
+      .modal-buttons { display:flex; gap:8px; justify-content:center; }
+      .modal-btn {
+        padding:8px 18px; border:none; border-radius:8px; font-size:12px;
+        font-weight:600; cursor:pointer; transition:opacity 0.15s;
+      }
+      .modal-btn:hover { opacity:0.85; }
+      .modal-btn-primary { background:#2563eb; color:white; }
+      .modal-btn-cancel { background:#f1f5f9; color:#64748b; }
 
       /* ── DUPLICATE BADGE (#7) ── */
       .badge-dupe { background: #7c3aed; color: white; }
@@ -667,7 +696,7 @@ function initInterface() {
             <div class="resize-handle" id="resizeHandle"></div>
             <div class="header" id="dragHeader">
               <div class="header-title">
-                  <div class="header-icon-ph"></div> SKU Master 5.0.0
+                  <div class="header-icon-ph"></div> SKU Master ${EXT_VERSION}
               </div>
               <div class="header-controls">
                   <button class="btn-icon" id="batchBtn" title="Пакетное открытие">⚡</button>
@@ -681,6 +710,7 @@ function initInterface() {
             <div class="settings-menu" id="settingsMenu">
                 <label class="setting-item"><input type="checkbox" id="protectionToggle"><div><span>Защита от бана (М.Видео)</span></div></label>
                 <label class="setting-item"><input type="checkbox" id="replaceChatToggle"><div><span>Закрепить в углу экрана</span></div></label>
+                <label class="setting-item"><input type="checkbox" id="autoCopyToggle" checked><div><span>Автокопирование при сборе</span></div></label>
             </div>
 
             <div class="history-menu" id="historyMenu">
@@ -796,6 +826,7 @@ function initInterface() {
 
       const protectionToggle = wrapper.querySelector('#protectionToggle');
       const replaceChatToggle = wrapper.querySelector('#replaceChatToggle');
+      const autoCopyToggle = wrapper.querySelector('#autoCopyToggle');
       const monitorBtn = wrapper.querySelector('#monitorBtn');
       const monitorArea = wrapper.querySelector('#monitorArea');
       const monitorList = wrapper.querySelector('#monitorList');
@@ -833,7 +864,7 @@ function initInterface() {
 
       function setElementPosition(el, x, y) { el.style.left = x + 'px'; el.style.top = y + 'px'; }
 
-      chrome.storage.local.get(['widgetPos', 'lastScanData', 'replaceChatBtn', 'protectionEnabled'], (res) => {
+      chrome.storage.local.get(['widgetPos', 'lastScanData', 'replaceChatBtn', 'protectionEnabled', 'autoCopyEnabled'], (res) => {
           if (res.widgetPos && !res.replaceChatBtn) {
               widgetState.x = res.widgetPos.x; widgetState.y = res.widgetPos.y;
               setElementPosition(wrapper, widgetState.x, widgetState.y);
@@ -846,6 +877,8 @@ function initInterface() {
           document.body.setAttribute('data-protection-enabled', isProt);
           // Синхронизируем localStorage — network_throttle.js читает его при document_start
           localStorage.setItem('skuProtectionEnabled', isProt ? 'true' : 'false');
+          // Автокопирование (default: true)
+          autoCopyToggle.checked = res.autoCopyEnabled !== false;
       });
 
       chrome.storage.onChanged.addListener((changes) => {
@@ -1057,17 +1090,22 @@ function initInterface() {
 
       document.addEventListener('mousedown', (e) => {
           if (e.target === host) return;
-          if (widgetState.isOpen) closePanel();
+          // Закрываем только dropdown-меню, но НЕ саму панель (есть кнопка ✕)
+          settingsMenu.classList.remove('active');
+          historyMenu.classList.remove('active');
       });
 
-      let isDragging = false, dragStart = 0, shiftX, shiftY;
+      let isDragging = false, dragStart = 0, shiftX, shiftY, startClientX, startClientY;
       const startDrag = (e) => {
-          if (widgetState.isFixedMode) return; 
+          if (widgetState.isFixedMode) return;
           if (e.target.closest('.fab-close-btn')) return;
           isDragging = false; dragStart = Date.now();
+          startClientX = e.clientX; startClientY = e.clientY;
           const rect = wrapper.getBoundingClientRect();
           shiftX = e.clientX - rect.left; shiftY = e.clientY - rect.top;
           function moveAt(pageX, pageY) {
+              // Порог 5px — игнорируем микродвижения при клике
+              if (!isDragging && Math.abs(pageX - startClientX) + Math.abs(pageY - startClientY) < 5) return;
               isDragging = true;
               let newX = pageX - shiftX; let newY = pageY - shiftY;
               newX = Math.max(0, Math.min(window.innerWidth - 56, newX));
@@ -1098,6 +1136,12 @@ function initInterface() {
           e.stopPropagation();
           wrapper.style.display = 'none';
           sessionStorage.setItem('skuMasterHidden', 'true');
+          // Подсказка как вернуть виджет
+          const hint = document.createElement('div');
+          hint.style.cssText = 'position:fixed;bottom:24px;right:24px;background:#1e293b;color:#f1f5f9;padding:12px 18px;border-radius:10px;font-size:13px;z-index:2147483647;box-shadow:0 4px 20px rgba(0,0,0,0.3);font-family:-apple-system,BlinkMacSystemFont,sans-serif;transition:opacity 0.3s;';
+          hint.textContent = 'Нажмите иконку расширения в панели браузера, чтобы вернуть виджет';
+          document.body.appendChild(hint);
+          setTimeout(() => { hint.style.opacity = '0'; setTimeout(() => hint.remove(), 300); }, 4000);
       };
       if (sessionStorage.getItem('skuMasterHidden') === 'true') wrapper.style.display = 'none';
 
@@ -1123,6 +1167,11 @@ function initInterface() {
       settingsBtn.onclick = () => {
           historyMenu.classList.remove('active');
           settingsMenu.classList.toggle('active');
+          if (settingsMenu.classList.contains('active')) {
+              const maxH = Math.max(100, mainPanel.offsetHeight - 62);
+              settingsMenu.style.maxHeight = maxH + 'px';
+              settingsMenu.style.overflowY = 'auto';
+          }
       }
 
       function renderHistory() {
@@ -1161,19 +1210,26 @@ function initInterface() {
           } else {
               renderHistory();
               historyMenu.classList.add('active');
+              const maxH = Math.max(100, mainPanel.offsetHeight - 62);
+              historyMenu.style.maxHeight = maxH + 'px';
+              historyMenu.style.overflowY = 'auto';
           }
       };
 
       batchBtn.onclick = () => {
           monitorArea.classList.remove('active');
+          monitorBtn.classList.remove('active');
           batchArea.classList.toggle('active');
+          batchBtn.classList.toggle('active', batchArea.classList.contains('active'));
       };
 
       // === МОНИТОРИНГ: логика панели ===
       monitorBtn.onclick = () => {
           batchArea.classList.remove('active');
+          batchBtn.classList.remove('active');
           const isOpening = !monitorArea.classList.contains('active');
           monitorArea.classList.toggle('active');
+          monitorBtn.classList.toggle('active', isOpening);
           if (isOpening) {
               chrome.runtime.sendMessage({ action: 'clearMonitorBadge' });
               loadMonitorPanel();
@@ -1238,6 +1294,7 @@ function initInterface() {
           batchAnalyzeBtn.style.display = 'block';
           batchActionsWrapper.style.display = 'none';
           batchState.uniqueSkus = [];
+          batchCheckResults = null;
           batchProgress.innerHTML = '';
           batchProgress.style.display = 'none';
           batchProgress.style.textAlign = '';
@@ -1246,6 +1303,15 @@ function initInterface() {
       }
 
       batchInput.addEventListener('input', resetBatchUI);
+
+      // Авто-выбор магазина по текущему сайту
+      if (window.location.hostname.includes('mvideo.ru')) {
+          batchState.isMvideo = true;
+          storeMv.classList.add('active');
+      } else if (window.location.hostname.includes('eldorado.ru')) {
+          batchState.isMvideo = false;
+          storeEl.classList.add('active');
+      }
 
       // CLEAR BUTTON
       batchClearBtn.onclick = () => {
@@ -1291,7 +1357,7 @@ function initInterface() {
                   }
               } catch (e) {
                   showToast("⛔ Ошибка доступа к Doc");
-                  alert("Не удалось открыть документ. Проверьте доступ по ссылке.");
+                  showAlert("Не удалось открыть документ. Проверьте доступ по ссылке.");
                   batchAnalyzeBtn.textContent = "🔍 Анализировать";
                   return;
               }
@@ -1362,7 +1428,7 @@ function initInterface() {
           const links = batchState.resolvedLinks;
           const total = links.length;
           
-          if (!confirm(`Найдено ${total} уникальных товаров.\nВнимание! Задержка увеличена (5-8 сек) во избежание бана.\nОткрыть вкладки?`)) return;
+          if (!await showConfirm(`Найдено ${total} уникальных товаров.\nВнимание! Задержка увеличена (5-8 сек) во избежание бана.\nОткрыть вкладки?`)) return;
 
           batchRunning = true;
           batchStopBtn.style.display = 'block';
@@ -1397,17 +1463,30 @@ function initInterface() {
       batchExportBtn.onclick = async () => {
           const links = batchState.resolvedLinks;
           if (!links || links.length === 0) return;
-          
-          let tableRows = "";
-          links.forEach(item => {
-              tableRows += `<tr><td>${item.sku}</td><td><a href="${item.url}">${item.url}</a></td></tr>`;
-          });
-
-          const table = `<table border="1"><tr><th>Артикул</th><th>Ссылка</th></tr>${tableRows}</table>`;
           const date = new Date().toISOString().slice(0,10);
           const suffix = batchState.isMvideo ? "_mv" : "_el";
-          downloadAsXLS(`batch_list_${date}${suffix}.xls`, table);
-          showToast(`Скачан XLS: ${links.length} строк`);
+
+          if (batchCheckResults && batchCheckResults.length > 0) {
+              // Экспорт с результатами проверки (статус + цена)
+              let rows = '';
+              batchCheckResults.forEach(r => {
+                  const statusText = { available: 'В наличии', sold_out: 'Нет в наличии', low_stock: 'Мало остатков', banned: 'Мягкий бан', error: 'Ошибка' }[r.status] || 'Неизвестно';
+                  const link = links.find(l => l.sku === r.sku);
+                  rows += `<tr><td>${r.sku}</td><td>${statusText}</td><td>${r.price || ''}</td><td><a href="${link?.url || ''}">${link?.url || ''}</a></td></tr>`;
+              });
+              const table = `<table border="1"><tr><th>Артикул</th><th>Статус</th><th>Цена</th><th>Ссылка</th></tr>${rows}</table>`;
+              downloadAsXLS(`availability_check_${date}${suffix}.xls`, table);
+              showToast(`Отчёт скачан: ${batchCheckResults.length} строк`);
+          } else {
+              // Экспорт без проверки (только SKU + URL)
+              let tableRows = "";
+              links.forEach(item => {
+                  tableRows += `<tr><td>${item.sku}</td><td><a href="${item.url}">${item.url}</a></td></tr>`;
+              });
+              const table = `<table border="1"><tr><th>Артикул</th><th>Ссылка</th></tr>${tableRows}</table>`;
+              downloadAsXLS(`batch_list_${date}${suffix}.xls`, table);
+              showToast(`Скачан XLS: ${links.length} строк`);
+          }
       };
 
       // === BULK AVAILABILITY CHECK (#3) ===
@@ -1420,6 +1499,13 @@ function initInterface() {
           batchCheckBtn.textContent = '⏳...';
           batchProgress.style.display = 'block';
           batchProgress.textContent = `Проверяю ${links.length} артикулов...`;
+
+          const progressHandler = (msg) => {
+              if (msg.action === 'bulkCheckProgress') {
+                  batchProgress.textContent = `Проверено ${msg.current} из ${msg.total}...`;
+              }
+          };
+          chrome.runtime.onMessage.addListener(progressHandler);
 
           try {
               const results = await new Promise((resolve) => {
@@ -1461,8 +1547,12 @@ function initInterface() {
                   };
                   const s = statusMap[r.status] || statusMap.error;
                   const priceStr = r.price ? `${r.price.toLocaleString('ru-RU')} ₽` : '';
+                  const itemLink = links.find(l => l.sku === r.sku);
+                  const skuHtml = itemLink?.url
+                      ? `<a href="${itemLink.url}" target="_blank" class="bulk-item-sku">${r.sku}</a>`
+                      : `<span class="bulk-item-sku">${r.sku}</span>`;
                   html += `<div class="bulk-item">
-                      <span class="bulk-item-sku">${r.sku}</span>
+                      ${skuHtml}
                       <div style="display:flex;align-items:center;gap:6px;">
                           ${priceStr ? `<span class="bulk-item-price">${priceStr}</span>` : ''}
                           <span class="bulk-item-status ${s.cls}">${s.text}</span>
@@ -1470,33 +1560,18 @@ function initInterface() {
                   </div>`;
               });
 
+              // Сохраняем результаты для экспорта через batchExportBtn
+              batchCheckResults = results;
+
               // Показываем в batchProgress area, заменяя его на контейнер
               batchProgress.innerHTML = `<div class="bulk-results">${html}</div>`;
               batchProgress.style.display = 'block';
               batchProgress.style.textAlign = 'left';
 
-              // Кнопка экспорта результатов проверки
-              const exportCheckBtn = document.createElement('button');
-              exportCheckBtn.className = 'btn-excel';
-              exportCheckBtn.style.cssText = 'width:100%; margin-top:6px; padding:7px; font-size:11px; border:none; border-radius:6px; color:white; cursor:pointer;';
-              exportCheckBtn.textContent = '📥 Скачать результат проверки';
-              exportCheckBtn.onclick = () => {
-                  let rows = '';
-                  results.forEach(r => {
-                      const statusText = { available: 'В наличии', sold_out: 'Нет в наличии', low_stock: 'Мало остатков', banned: 'Мягкий бан', error: 'Ошибка' }[r.status] || 'Неизвестно';
-                      const link = links.find(l => l.sku === r.sku);
-                      rows += `<tr><td>${r.sku}</td><td>${statusText}</td><td>${r.price || ''}</td><td><a href="${link?.url || ''}">${link?.url || ''}</a></td></tr>`;
-                  });
-                  const table = `<table border="1"><tr><th>Артикул</th><th>Статус</th><th>Цена</th><th>Ссылка</th></tr>${rows}</table>`;
-                  const date = new Date().toISOString().slice(0,10);
-                  downloadAsXLS(`availability_check_${date}.xls`, table);
-                  showToast('Отчёт скачан');
-              };
-              batchProgress.appendChild(exportCheckBtn);
-
           } catch (e) {
               showToast('Ошибка проверки');
           } finally {
+              chrome.runtime.onMessage.removeListener(progressHandler);
               batchCheckBtn.disabled = false;
               batchCheckBtn.textContent = '🔍 Проверить';
           }
@@ -1508,21 +1583,46 @@ function initInterface() {
       });
 
       showToast = (text) => { toastMsg.textContent = text; toastMsg.style.display = 'block'; setTimeout(() => { toastMsg.style.display = 'none'; }, 2000); };
+
+      // Кастомные диалоги (замена native confirm/alert)
+      function showModal(text, isConfirm) {
+          return new Promise((resolve) => {
+              const overlay = document.createElement('div');
+              overlay.className = 'modal-overlay';
+              overlay.innerHTML = `<div class="modal-box">
+                  <div class="modal-text">${text}</div>
+                  <div class="modal-buttons">
+                      ${isConfirm ? '<button class="modal-btn modal-btn-cancel" data-action="cancel">Отмена</button>' : ''}
+                      <button class="modal-btn modal-btn-primary" data-action="ok">OK</button>
+                  </div>
+              </div>`;
+              mainPanel.appendChild(overlay);
+              overlay.addEventListener('click', (e) => {
+                  const action = e.target.dataset.action;
+                  if (action) { overlay.remove(); resolve(action === 'ok'); }
+              });
+          });
+      }
+      const showConfirm = (text) => showModal(text, true);
+      const showAlert = (text) => showModal(text, false);
       protectionToggle.onchange = (e) => { const isEnabled = e.target.checked; chrome.storage.local.set({ protectionEnabled: isEnabled }); document.body.setAttribute('data-protection-enabled', isEnabled); localStorage.setItem('skuProtectionEnabled', isEnabled ? 'true' : 'false'); showToast(isEnabled ? "Защита включена" : "Защита выключена"); };
       replaceChatToggle.onchange = (e) => { const isEnabled = e.target.checked; chrome.storage.local.set({ replaceChatBtn: isEnabled }); toggleChatReplacement(isEnabled); showToast(isEnabled ? "Чат заменен на виджет" : "Виджет откреплен"); };
+      autoCopyToggle.onchange = (e) => { const isEnabled = e.target.checked; chrome.storage.local.set({ autoCopyEnabled: isEnabled }); showToast(isEnabled ? "Автокопирование включено" : "Автокопирование выключено"); };
 
       collectBtn.onclick = async () => {
-        statusText.textContent = 'Сканирую...'; 
-        problemButtons.style.display = 'none'; 
-        exportAllBtn.style.display = 'none'; 
+        collectBtn.disabled = true;
+        collectBtn.textContent = '⏳ Сканирую...';
+        statusText.textContent = 'Сканирую...';
+        problemButtons.style.display = 'none';
+        exportAllBtn.style.display = 'none';
         mainCopyBtn.style.display = 'none';
         
         resultsArea.innerHTML = '<div style="text-align:center; padding:40px; font-size:24px;">⏳</div>';
         
         try { 
             chrome.runtime.sendMessage({ action: "collectData" }, async (response) => { 
-                if (chrome.runtime.lastError) { statusText.innerHTML = '<span style="color:red">Ошибка: F5</span>'; return; } 
-                if (!response) { statusText.textContent = 'Ошибка данных'; return; } 
+                if (chrome.runtime.lastError) { statusText.innerHTML = '<span style="color:red">Ошибка: F5</span>'; collectBtn.disabled = false; collectBtn.textContent = 'Собрать артикулы'; return; }
+                if (!response) { statusText.textContent = 'Ошибка данных'; collectBtn.disabled = false; collectBtn.textContent = 'Собрать артикулы'; return; } 
                 
                 // === DUPLICATE DETECTION ===
                 chrome.runtime.sendMessage({ action: "getProcessedSkus" }, (procRes) => {
@@ -1547,24 +1647,32 @@ function initInterface() {
                     if (response.results.length > 0 && response.mvCount * response.elCount === 0) {
                         const problems = response.results.filter(r => r.problemType || r.isSleeping || r.regionError || r.isDuplicate || r.isHistorical);
                         if (problems.length === 0) {
-                            const text = response.results.map(i => i.sku).filter(Boolean).join(', ');
-                            const html = response.results.map(i => `<a href="${i.url}">${i.sku}</a>`).filter(Boolean).join(', ');
-                            smartCopy(text, html, (success) => {
-                                if (success) {
-                                    showToast(`Успех! ${response.results.length} скопировано`);
-                                    const skusToMark = [...new Set(response.results.filter(r => r.sku).map(r => r.sku))];
-                                    if (skusToMark.length > 0) chrome.runtime.sendMessage({ action: 'markProcessed', skus: skusToMark });
-                                } else {
-                                    mainCopyBtn.style.display = 'block';
-                                    mainCopyBtn.textContent = `📋 Скопировать список (${response.results.length} шт.)`;
-                                    showToast('Готово. Нажмите "Скопировать"');
-                                }
-                            });
+                            if (autoCopyToggle.checked) {
+                                const text = response.results.map(i => i.sku).filter(Boolean).join(', ');
+                                const html = response.results.map(i => `<a href="${i.url}">${i.sku}</a>`).filter(Boolean).join(', ');
+                                smartCopy(text, html, (success) => {
+                                    if (success) {
+                                        showToast(`Успех! ${response.results.length} скопировано`);
+                                        const skusToMark = [...new Set(response.results.filter(r => r.sku).map(r => r.sku))];
+                                        if (skusToMark.length > 0) chrome.runtime.sendMessage({ action: 'markProcessed', skus: skusToMark });
+                                    } else {
+                                        mainCopyBtn.style.display = 'block';
+                                        mainCopyBtn.textContent = `📋 Скопировать список (${response.results.length} шт.)`;
+                                        showToast('Готово. Нажмите "Скопировать"');
+                                    }
+                                });
+                            } else {
+                                mainCopyBtn.style.display = 'block';
+                                mainCopyBtn.textContent = `📋 Скопировать список (${response.results.length} шт.)`;
+                                showToast(`Найдено: ${response.results.length}`);
+                            }
                         }
                     }
+                    collectBtn.disabled = false;
+                    collectBtn.textContent = 'Собрать артикулы';
                 });
-            }); 
-        } catch(e) { statusText.innerHTML = '<span style="color:red">Обновите страницу!</span>'; }
+            });
+        } catch(e) { statusText.innerHTML = '<span style="color:red">Обновите страницу!</span>'; collectBtn.disabled = false; collectBtn.textContent = 'Собрать артикулы'; }
       };
 
       function applyScanData(data) {
@@ -1624,7 +1732,7 @@ function initInterface() {
         let dataToExport = items; 
         if (onlyProblems) { 
             dataToExport = items.filter(r => r.problemType || r.isSleeping || r.regionError); 
-            if (dataToExport.length === 0) { alert('Нет проблемных товаров'); return; } 
+            if (dataToExport.length === 0) { showToast('Нет проблемных товаров'); return; } 
         } 
         
         let rows = "";
@@ -1711,7 +1819,9 @@ function initInterface() {
           div.querySelector('.btn-watch').onclick = function() {
             const sku = this.dataset.sku;
             const afterNotify = 'keep';
-            chrome.runtime.sendMessage({ action: 'addMonitorItem', item: { sku, url: this.dataset.url, store: this.dataset.store, lastStatus: this.dataset.status, afterNotify, addedAt: Date.now() } }, () => { this.textContent = '✅'; this.classList.add('watching'); this.disabled = true; showToast(`Следим за ${sku}`); });
+            const itemData = { sku, url: this.dataset.url, store: this.dataset.store, lastStatus: this.dataset.status, afterNotify, addedAt: Date.now() };
+            if (this.dataset.status === 'banned') itemData.bannedAt = Date.now();
+            chrome.runtime.sendMessage({ action: 'addMonitorItem', item: itemData }, () => { this.textContent = '✅'; this.classList.add('watching'); this.disabled = true; showToast(`Следим за ${sku}`); });
           };
         }
         container.appendChild(div); });

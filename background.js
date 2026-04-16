@@ -74,10 +74,19 @@ chrome.notifications.onClicked.addListener((notifId) => {
     return;
   }
 
-  // Батчевые уведомления — открываем виджет на активной вкладке магазина
+  // Батчевые уведомления — открываем вкладки разбаненных/обновлённых товаров
   if (notifId === 'ban-check-batch' || notifId === 'monitor-batch') {
-    chrome.tabs.query({ active: true, currentWindow: true }, ([activeTab]) => {
-      if (activeTab) chrome.tabs.sendMessage(activeTab.id, { action: 'toggleWidget' }).catch(() => {});
+    const key = notifId === 'ban-check-batch' ? 'notifUrls_banCheck' : 'notifUrls_monitor';
+    chrome.storage.session.get(key, (res) => {
+      const urls = res[key] || [];
+      if (urls.length > 0) {
+        urls.forEach(url => chrome.tabs.create({ url, active: false }));
+        chrome.storage.session.remove(key);
+      } else {
+        chrome.tabs.query({ active: true, currentWindow: true }, ([activeTab]) => {
+          if (activeTab) chrome.tabs.sendMessage(activeTab.id, { action: 'toggleWidget' }).catch(() => {});
+        });
+      }
     });
     return;
   }
@@ -147,7 +156,7 @@ chrome.webRequest.onHeadersReceived.addListener(
           chrome.storage.local.get('monitoredItems', (res) => {
             const items = res.monitoredItems || [];
             if (!items.find(i => i.sku === sku)) {
-              items.push({ sku, url: tab.url, store, lastStatus: 'banned', afterNotify: 'keep', addedAt: Date.now() });
+              items.push({ sku, url: tab.url, store, lastStatus: 'banned', afterNotify: 'keep', addedAt: Date.now(), bannedAt: Date.now() });
               chrome.storage.local.set({ monitoredItems: items });
             }
             scheduleBanCheck();
@@ -350,7 +359,7 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
 
   // === BULK AVAILABILITY CHECK (#3) ===
   if (req.action === "bulkCheck") {
-    bulkCheckAvailability(req.items, req.store).then(sendResponse);
+    bulkCheckAvailability(req.items, req.store, sender.tab.id).then(sendResponse);
     return true;
   }
 
@@ -414,21 +423,40 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
 });
 
 
+// === УТИЛИТА: форматирование длительности бана ===
+function formatBanDuration(bannedAt) {
+  const start = new Date(bannedAt);
+  const end = new Date();
+  const diffMs = end - start;
+  const diffMin = Math.floor(diffMs / 60000);
+  const h = Math.floor(diffMin / 60);
+  const m = diffMin % 60;
+  const fmt = (d) => d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  const duration = h > 0 ? `${h}ч ${m}мин` : `${m}мин`;
+  return `${fmt(start)} — ${fmt(end)} (${duration})`;
+}
+
 // === BULK AVAILABILITY CHECK (#3) ===
-async function bulkCheckAvailability(items, store) {
+async function bulkCheckAvailability(items, store, senderTabId) {
   const results = [];
+
+  function sendProgress(current, total) {
+    try { chrome.tabs.sendMessage(senderTabId, { action: 'bulkCheckProgress', current, total }); } catch(e) {}
+  }
 
   if (store === 'mvideo') {
     // М.Видео — Angular SPA: HTML-парсинг и BFF prices не определяют наличие.
     // Единственный надёжный способ — открыть вкладку, дождаться рендера, инжектнуть readProductInfo.
+    // Создаём свёрнутое окно, чтобы вкладки не мелькали у пользователя
+    const checkWindow = await chrome.windows.create({ url: 'about:blank', state: 'minimized', focused: false });
+    const checkWindowId = checkWindow.id;
+
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       let price = null;
 
       try {
-        // Открываем фоновую вкладку, ждём рендер Angular, инжектим readProductInfo
-        // readProductInfo теперь возвращает и наличие, и цену ("Цена для всех") из DOM
-        const tab = await chrome.tabs.create({ url: item.url, active: false });
+        const tab = await chrome.tabs.create({ url: item.url, windowId: checkWindowId, active: false });
         await new Promise((resolve) => {
           const timeout = setTimeout(() => { chrome.tabs.onUpdated.removeListener(listener); resolve(); }, 15000);
           const listener = (tabId, changeInfo) => {
@@ -464,8 +492,11 @@ async function bulkCheckAvailability(items, store) {
       } catch (e) {
         results.push({ sku: item.sku, status: 'error', price });
       }
+      sendProgress(i + 1, items.length);
       if (i < items.length - 1) await new Promise(r => setTimeout(r, 500));
     }
+    // Закрываем свёрнутое окно проверки
+    try { await chrome.windows.remove(checkWindowId); } catch(e) {}
   } else {
     // Эльдорадо: последовательные запросы с задержкой
     for (let i = 0; i < items.length; i++) {
@@ -491,6 +522,7 @@ async function bulkCheckAvailability(items, store) {
       } catch (e) {
         results.push({ sku: item.sku, status: 'error', price: null });
       }
+      sendProgress(i + 1, items.length);
       // Задержка между запросами для Эльдорадо
       if (i < items.length - 1) {
         await new Promise(r => setTimeout(r, 400));
@@ -514,7 +546,7 @@ async function runBanQuickCheck() {
   if (bannedItems.length === 0) return; // нечего проверять — не переназначаем alarm
 
   const updatedItems = [...monitoredItems];
-  const unbannedSkus = [];
+  const unbannedItems = [];
 
   for (const item of bannedItems) {
     const idx = updatedItems.findIndex(i => i.sku === item.sku);
@@ -528,22 +560,25 @@ async function runBanQuickCheck() {
         const priceData = data.body?.materialPrices?.[0]?.price;
         const price = priceData?.basePromoPrice ?? priceData?.basePrice;
         updatedItems[idx] = { ...item, lastStatus: price ? 'available' : 'sold_out' };
-        unbannedSkus.push(item.sku);
+        unbannedItems.push({ sku: item.sku, url: item.url, bannedAt: item.bannedAt || item.addedAt });
       }
     } catch (e) {}
   }
 
   await chrome.storage.local.set({ monitoredItems: updatedItems });
-  if (unbannedSkus.length > 0) {
-    const msg = unbannedSkus.length === 1
-      ? `Мягкий бан снят! Артикул: ${unbannedSkus[0]}`
-      : `Бан снят у ${unbannedSkus.length} товаров: ${unbannedSkus.join(', ')}`;
+  if (unbannedItems.length > 0) {
+    const first = unbannedItems[0];
+    const title = unbannedItems.length === 1
+      ? `С товара ${first.sku} снят БАН!`
+      : `С товара ${first.sku} и ещё ${unbannedItems.length - 1} снят БАН!`;
+    const durations = unbannedItems.map(i => `${i.sku}: ${formatBanDuration(i.bannedAt)}`).join('\n');
+    await chrome.storage.session.set({ notifUrls_banCheck: unbannedItems.map(i => i.url) });
     chrome.notifications.create('ban-check-batch', {
       type: 'basic', iconUrl: 'icon.png',
-      title: '🔓 Бан снят — SKU Master',
-      message: msg, priority: 2
+      title: '🔓 ' + title,
+      message: durations, priority: 2
     });
-    chrome.action.setBadgeText({ text: String(unbannedSkus.length) });
+    chrome.action.setBadgeText({ text: String(unbannedItems.length) });
     chrome.action.setBadgeBackgroundColor({ color: '#28a745' });
   }
 
@@ -558,11 +593,12 @@ async function runMonitorCheck() {
   if (monitoredItems.length === 0) return;
 
   const updatedItems = [];
-  const banLiftedSkus = [];
+  const banLiftedItems = [];
   const availableSkus = [];
 
   for (const item of monitoredItems) {
     let newStatus = item.lastStatus;
+    let newBannedAt = item.bannedAt;
 
     try {
       if (item.store === 'mvideo') {
@@ -577,6 +613,7 @@ async function runMonitorCheck() {
           newStatus = price ? 'available' : 'sold_out';
         } else if (r.status === 400 || r.status === 403 || r.status === 429) {
           newStatus = 'banned';
+          if (item.lastStatus !== 'banned') newBannedAt = Date.now();
         }
       } else if (item.store === 'eldorado') {
         const r = await fetch(item.url, { headers: { 'Cache-Control': 'no-cache' } });
@@ -595,26 +632,38 @@ async function runMonitorCheck() {
     const isNowGood = newStatus === 'available';
 
     if (wasProblematic && isNowGood) {
-      if (item.lastStatus === 'banned') banLiftedSkus.push(item.sku);
+      if (item.lastStatus === 'banned') banLiftedItems.push({ sku: item.sku, url: item.url, bannedAt: item.bannedAt || item.addedAt });
       else availableSkus.push(item.sku);
 
       if (item.afterNotify === 'auto-remove') continue;
     }
 
-    updatedItems.push({ ...item, lastStatus: newStatus });
+    updatedItems.push({ ...item, lastStatus: newStatus, bannedAt: newBannedAt });
   }
 
   await chrome.storage.local.set({ monitoredItems: updatedItems });
 
-  const totalChanges = banLiftedSkus.length + availableSkus.length;
+  const totalChanges = banLiftedItems.length + availableSkus.length;
   if (totalChanges > 0) {
     // Одно сводное уведомление
     const parts = [];
-    if (banLiftedSkus.length > 0) parts.push(`Бан снят: ${banLiftedSkus.join(', ')}`);
+    if (banLiftedItems.length > 0) {
+      const first = banLiftedItems[0];
+      const banTitle = banLiftedItems.length === 1
+        ? `С товара ${first.sku} снят БАН!`
+        : `С товара ${first.sku} и ещё ${banLiftedItems.length - 1} снят БАН!`;
+      const durations = banLiftedItems.map(i => `${i.sku}: ${formatBanDuration(i.bannedAt)}`).join('\n');
+      parts.push(`${banTitle}\n${durations}`);
+    }
     if (availableSkus.length > 0) parts.push(`В наличии: ${availableSkus.join(', ')}`);
-    const title = banLiftedSkus.length > 0 && availableSkus.length === 0
+    const title = banLiftedItems.length > 0 && availableSkus.length === 0
       ? '🔓 Бан снят — SKU Master'
       : '✅ Обновление — SKU Master';
+    const notifUrls = [
+      ...banLiftedItems.map(i => i.url),
+      ...availableSkus.map(sku => monitoredItems.find(i => i.sku === sku)?.url).filter(Boolean)
+    ];
+    if (notifUrls.length > 0) await chrome.storage.session.set({ notifUrls_monitor: notifUrls });
     chrome.notifications.create('monitor-batch', {
       type: 'basic', iconUrl: 'icon.png',
       title, message: parts.join('\n'), priority: 2

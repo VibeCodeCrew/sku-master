@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SKU Master",
-  "version": "5.0.1",
+  "version": "5.0.2",
   "author": "VibeCodeCrew",
   "description": "Сборщик артикулов с вкладок М.Видео и Эльдорадо. Пакетное открытие из Google Docs, история обработки, мониторинг цен и наличия.",
   "permissions": ["tabs", "scripting", "storage", "webRequest", "clipboardWrite", "alarms", "notifications"],
