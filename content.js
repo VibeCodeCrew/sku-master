@@ -1376,15 +1376,8 @@ function initInterface() {
               }
           }
 
-          // 2. Extract SKUs: сначала из URL-ов продуктов, потом из чистого текста
-          const urls = text.match(/https?:\/\/[^\s]+/g) || [];
-          const urlSkus = urls.flatMap(url => {
-              const m = url.match(/(\d{7,9})(?=[\/?\s#]|$)/);
-              return m ? [m[1]] : [];
-          });
-          const cleanText = text.replace(/https?:\/\/[^\s]+/g, '');
-          const textSkus = cleanText.match(/\b\d{7,9}\b/g) || [];
-          const matches = [...urlSkus, ...textSkus];
+          // 2. Extract SKUs
+          const matches = text.match(/\b\d{7,10}\b/g) || [];
           const unique = [...new Set(matches)];
           
           if(unique.length === 0) {
