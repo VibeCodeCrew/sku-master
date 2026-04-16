@@ -288,6 +288,22 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
         if (tab && tab.windowId) chrome.windows.update(tab.windowId, { focused: true });
     });
   }
+  if (req.action === "checkForUpdate") {
+    (async () => {
+      try {
+        const resp = await fetch(UPDATE_URL, { cache: 'no-store' });
+        if (!resp.ok) return sendResponse({ error: 'fetch failed' });
+        const remote = await resp.json();
+        const local = chrome.runtime.getManifest();
+        if (isNewerVersion(remote.version, local.version)) {
+          sendResponse({ hasUpdate: true, remoteVersion: remote.version, localVersion: local.version });
+        } else {
+          sendResponse({ hasUpdate: false, localVersion: local.version });
+        }
+      } catch (e) { sendResponse({ error: e.message }); }
+    })();
+    return true;
+  }
   
   // === FIX v4.9.0: Open in specific window ===
   if (req.action === "openTab") {

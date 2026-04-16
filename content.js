@@ -522,6 +522,11 @@ function initInterface() {
         transition: background 0.15s; margin-bottom: 2px;
       }
       .setting-item:hover { background: #f1f5f9; }
+      .settings-version { display:flex; align-items:center; justify-content:space-between; padding:8px 8px 4px; border-top:1px solid #e2e8f0; margin-top:4px; }
+      .settings-version-label { font-size:11px; color:#94a3b8; }
+      .settings-update-btn { font-size:11px; padding:3px 10px; background:#2563eb; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600; transition:background 0.15s; }
+      .settings-update-btn:hover { background:#1d4ed8; }
+      .settings-update-btn:disabled { background:#94a3b8; cursor:default; }
 
       .history-menu {
         position: absolute; top: 52px; right: 46px; width: 210px;
@@ -711,6 +716,10 @@ function initInterface() {
                 <label class="setting-item"><input type="checkbox" id="protectionToggle"><div><span>Защита от бана (М.Видео)</span></div></label>
                 <label class="setting-item"><input type="checkbox" id="replaceChatToggle"><div><span>Закрепить в углу экрана</span></div></label>
                 <label class="setting-item"><input type="checkbox" id="autoCopyToggle" checked><div><span>Автокопирование при сборе</span></div></label>
+                <div class="settings-version">
+                    <span class="settings-version-label" id="versionLabel">v...</span>
+                    <button class="settings-update-btn" id="checkUpdateBtn">Проверить обновления</button>
+                </div>
             </div>
 
             <div class="history-menu" id="historyMenu">
@@ -827,6 +836,10 @@ function initInterface() {
       const protectionToggle = wrapper.querySelector('#protectionToggle');
       const replaceChatToggle = wrapper.querySelector('#replaceChatToggle');
       const autoCopyToggle = wrapper.querySelector('#autoCopyToggle');
+      const versionLabel = wrapper.querySelector('#versionLabel');
+      const checkUpdateBtn = wrapper.querySelector('#checkUpdateBtn');
+
+      versionLabel.textContent = 'v' + chrome.runtime.getManifest().version;
       const monitorBtn = wrapper.querySelector('#monitorBtn');
       const monitorArea = wrapper.querySelector('#monitorArea');
       const monitorList = wrapper.querySelector('#monitorList');
@@ -1363,9 +1376,15 @@ function initInterface() {
               }
           }
 
-          // 2. Extract SKUs (убираем URL перед извлечением, чтобы не захватывать числа из ссылок)
+          // 2. Extract SKUs: сначала из URL-ов продуктов, потом из чистого текста
+          const urls = text.match(/https?:\/\/[^\s]+/g) || [];
+          const urlSkus = urls.flatMap(url => {
+              const m = url.match(/(\d{7,9})(?=[\/?\s#]|$)/);
+              return m ? [m[1]] : [];
+          });
           const cleanText = text.replace(/https?:\/\/[^\s]+/g, '');
-          const matches = cleanText.match(/\b\d{7,9}\b/g) || [];
+          const textSkus = cleanText.match(/\b\d{7,9}\b/g) || [];
+          const matches = [...urlSkus, ...textSkus];
           const unique = [...new Set(matches)];
           
           if(unique.length === 0) {
@@ -1608,6 +1627,27 @@ function initInterface() {
       protectionToggle.onchange = (e) => { const isEnabled = e.target.checked; chrome.storage.local.set({ protectionEnabled: isEnabled }); document.body.setAttribute('data-protection-enabled', isEnabled); localStorage.setItem('skuProtectionEnabled', isEnabled ? 'true' : 'false'); showToast(isEnabled ? "Защита включена" : "Защита выключена"); };
       replaceChatToggle.onchange = (e) => { const isEnabled = e.target.checked; chrome.storage.local.set({ replaceChatBtn: isEnabled }); toggleChatReplacement(isEnabled); showToast(isEnabled ? "Чат заменен на виджет" : "Виджет откреплен"); };
       autoCopyToggle.onchange = (e) => { const isEnabled = e.target.checked; chrome.storage.local.set({ autoCopyEnabled: isEnabled }); showToast(isEnabled ? "Автокопирование включено" : "Автокопирование выключено"); };
+      checkUpdateBtn.onclick = () => {
+        checkUpdateBtn.disabled = true;
+        checkUpdateBtn.textContent = 'Проверка...';
+        chrome.runtime.sendMessage({ action: 'checkForUpdate' }, (res) => {
+          checkUpdateBtn.disabled = false;
+          if (!res || res.error) {
+            checkUpdateBtn.textContent = 'Проверить обновления';
+            showToast('Не удалось проверить обновления');
+            return;
+          }
+          if (res.hasUpdate) {
+            checkUpdateBtn.textContent = `Обновить до v${res.remoteVersion}`;
+            checkUpdateBtn.onclick = () => { window.open('https://github.com/VibeCodeCrew/sku-master/archive/refs/heads/master.zip', '_blank'); };
+            showToast(`Доступна версия ${res.remoteVersion}!`);
+          } else {
+            checkUpdateBtn.textContent = 'Актуальная версия ✓';
+            setTimeout(() => { checkUpdateBtn.textContent = 'Проверить обновления'; }, 3000);
+            showToast('У вас последняя версия');
+          }
+        });
+      };
 
       collectBtn.onclick = async () => {
         collectBtn.disabled = true;
