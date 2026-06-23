@@ -1,10 +1,18 @@
 {
   "manifest_version": 3,
   "name": "SKU Master",
-  "version": "5.0.3",
+  "version": "5.2.0",
   "author": "VibeCodeCrew",
-  "description": "Сборщик артикулов с вкладок М.Видео и Эльдорадо. Пакетное открытие из Google Docs, история обработки, мониторинг цен и наличия.",
-  "permissions": ["tabs", "scripting", "storage", "webRequest", "clipboardWrite", "alarms", "notifications"],
+  "description": "SKU Master — Glassmorphism UI v5.2.0. Сбор артикулов, bulk check, мониторинг, детекция бана.",
+  "permissions": [
+    "tabs",
+    "scripting",
+    "storage",
+    "webRequest",
+    "clipboardWrite",
+    "alarms",
+    "notifications"
+  ],
   "host_permissions": [
     "*://www.eldorado.ru/*",
     "*://www.mvideo.ru/*",
@@ -23,20 +31,34 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["icon.png", "iconsmall.png"],
-      "matches": ["<all_urls>"]
+      "resources": [
+        "icon.png",
+        "iconsmall.png"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ],
   "content_scripts": [
     {
-      "matches": ["*://www.mvideo.ru/*"],
-      "js": ["network_throttle.js"],
+      "matches": [
+        "*://www.mvideo.ru/*"
+      ],
+      "js": [
+        "network_throttle.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN"
     },
     {
-      "matches": ["*://www.eldorado.ru/*", "*://www.mvideo.ru/*"],
-      "js": ["content.js"],
+      "matches": [
+        "*://www.eldorado.ru/*",
+        "*://www.mvideo.ru/*"
+      ],
+      "js": [
+        "content_v2.js"
+      ],
       "run_at": "document_end"
     }
   ]

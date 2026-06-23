@@ -184,21 +184,45 @@ function readProductInfo() {
   const host = window.location.hostname;
   let sku = null;
   let problemType = null;
-  let regionError = false; 
+  let regionError = false;
+  let price = null;
 
   if (document.body.getAttribute('data-request-blocked') === 'true') {
       const match = window.location.href.match(/(\d+)(\/?)$/);
       if (match) sku = match[1];
-      return { sku, problemType: 'banned', regionError: false };
+      return { sku, problemType: 'banned', regionError: false, price };
   }
 
   try {
     const normalize = (str) => (str || '').toLowerCase();
+    const pageText = document.body.textContent || '';
+    const pageTextLower = pageText.toLowerCase();
 
+    // === РЕГИОН ===
     if (host.includes('mvideo.ru')) {
-        const locNode = document.querySelector('.location-text');
-        if (locNode && !normalize(locNode.textContent).includes('москва')) regionError = true;
-    } 
+        // Новый дизайн М.Видео: ищем "Москва" в модалке выбора города или в шапке
+        let isMoscow = false;
+        // Сначала проверяем модалку/блок "Ваш город"
+        const cityModalEl = [...document.querySelectorAll('div, span')].find(el =>
+            el.textContent && el.textContent.includes('Ваш город')
+        );
+        if (cityModalEl) {
+            // Ищем город внутри модалки/её предка, чтобы избежать ложного срабатывания,
+            // когда "Ваш город" и город находятся в разных элементах.
+            const root = cityModalEl.closest('[role="dialog"]') || cityModalEl.closest('div') || cityModalEl;
+            isMoscow = normalize(root.textContent).includes('москва');
+        }
+        if (!isMoscow) {
+            // Fallback: ищем "Москва" в шапке (span/div в верхней части страницы)
+            for (const el of document.querySelectorAll('span, div')) {
+                if (normalize(el.textContent.trim()) === 'москва') {
+                    const rect = el.getBoundingClientRect ? el.getBoundingClientRect() : { top: 0 };
+                    if (rect.top < 150) { isMoscow = true; break; }
+                }
+            }
+        }
+        if (!isMoscow) regionError = true;
+    }
     else if (host.includes('eldorado.ru')) {
         let isMoscow = false;
         const elNode = document.querySelector('.elme');
@@ -210,6 +234,7 @@ function readProductInfo() {
         if (!isMoscow) regionError = true;
     }
 
+    // === SKU ===
     const processedLink = document.querySelector('.ext-link');
     if (processedLink) {
       sku = processedLink.innerText.replace(/\s/g, '');
@@ -217,11 +242,9 @@ function readProductInfo() {
       const btn = document.querySelector('button[data-dy="article"]');
       if (btn) sku = btn.innerText.replace(/\D/g, '');
     } else if (host.includes('mvideo.ru')) {
-      const spans = document.querySelectorAll('span[mvidremovespaces]');
-      for (let span of spans) {
-        const text = span.innerText.replace(/\s/g, '');
-        if (/^\d+$/.test(text) && text.length > 5) { sku = text; break; }
-      }
+      // Новый дизайн М.Видео: SKU отображается как "Код товара: 2008 9187"
+      const skuMatch = pageText.match(/Код товара[:\s]+(\d[\d\s]*\d)/);
+      if (skuMatch) sku = skuMatch[1].replace(/\s/g, '');
     }
 
     if (!sku) {
@@ -229,12 +252,14 @@ function readProductInfo() {
         if (match) sku = match[1];
     }
 
+    // === НАЛИЧИЕ / СТАТУС ===
     if (sku) {
       if (host.includes('mvideo.ru')) {
-        const soldOut = document.querySelector('.product-sold-out-text');
-        const notif = document.querySelector('mvid-product-notification .product-notification__text');
-        const isLow = notif && notif.textContent.includes('Осталось мало');
-        if (soldOut) problemType = 'sold_out';
+        // Новый дизайн: sold_out — текст "Товар временно отсутствует в продаже"
+        const isSoldOut = pageTextLower.includes('товар временно отсутствует в продаже');
+        // Новый дизайн: low_stock — ищем "осталось мало" или похожие фразы
+        const isLow = pageTextLower.includes('осталось мало') || pageTextLower.includes('мало осталось');
+        if (isSoldOut) problemType = 'sold_out';
         else if (isLow) problemType = 'low_stock';
       } else if (host.includes('eldorado.ru')) {
         const safeText = document.body.textContent.toLowerCase().replace(/\s+/g, ' ');
@@ -245,17 +270,22 @@ function readProductInfo() {
       }
     }
 
-    // Цена: читаем из DOM — "Цена для всех" (не персональная)
+    // === ЦЕНА ===
     if (host.includes('mvideo.ru')) {
-      // Залогиненный: блок "Цена для всех" отдельно от персональной
-      const priceForAllEl = document.querySelector('.emphasized-personal-price__price-for-all .price__main-value');
-      if (priceForAllEl) {
-        price = parseInt(priceForAllEl.textContent.replace(/\D/g, '')) || null;
-      } else {
-        // Не залогиненный: обычный блок цены (класс price--pdp-price-for-all без родительского emphasized-personal-price)
-        const mainPriceEl = document.querySelector('.price--pdp-price-for-all .price__main-value, .price--pdp-price .price__main-value');
-        if (mainPriceEl) {
-          price = parseInt(mainPriceEl.textContent.replace(/\D/g, '')) || null;
+      // Новый дизайн М.Видео: цена внутри <mvid-product-details-card>
+      const priceCard = document.querySelector('mvid-product-details-card');
+      if (priceCard) {
+        const cardText = priceCard.textContent;
+        // Ищем первое число с ₽ — это актуальная цена (не зачёркнутая)
+        const match = cardText.match(/(\d[\d\s]*)\s*₽/);
+        if (match) price = parseInt(match[1].replace(/\s/g, '')) || null;
+      }
+      // Fallback: если веб-компонент не найден, ищем по всей странице
+      if (!price) {
+        const priceContainer = document.querySelector('[class*="price"]');
+        if (priceContainer) {
+          const match = priceContainer.textContent.match(/(\d[\d\s]*)\s*₽/);
+          if (match) price = parseInt(match[1].replace(/\s/g, '')) || null;
         }
       }
     } else if (host.includes('eldorado.ru')) {
@@ -671,7 +701,7 @@ async function runMonitorCheck() {
       const durations = banLiftedItems.map(i => `${i.sku}: ${formatBanDuration(i.bannedAt)}`).join('\n');
       parts.push(`${banTitle}\n${durations}`);
     }
-    if (availableSkus.length > 0) parts.push(`В наличии: ${availableSkus.join(', ')}`);
+    if (availableSkus.length > 0) parts.push(`В наличии: ${availableSkus.join(',')}`);
     const title = banLiftedItems.length > 0 && availableSkus.length === 0
       ? '🔓 Бан снят — SKU Master'
       : '✅ Обновление — SKU Master';
